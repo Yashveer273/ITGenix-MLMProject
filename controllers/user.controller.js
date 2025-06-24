@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
 const generateReferralCode = (id) => {
-  const timestamp = Date.now(); 
+  const timestamp = Date.now();
   return `${id}-${timestamp}`;
 };
 
@@ -20,12 +20,13 @@ export const signup = async (req, res) => {
       expiresIn: "7d",
     });
     const hashedPassword = await bcrypt.hash(password, 10);
-    const MyreferalCode = generateReferralCode(JSON.stringify(phone));
+    const MyreferalCode = generateReferralCode(phone);
 
     user = new User({
       name,
       email,
       phone,
+      id: phone,
       address,
       token,
       password: hashedPassword,
@@ -36,7 +37,7 @@ export const signup = async (req, res) => {
 
     res.status(201).json({
       msg: "User registered",
-      user: { name, email, phone, address, referalCode },
+      user: { name, email, id: phone, address, MyreferalCode },
     });
   } catch (err) {
     console.log(err);
@@ -64,12 +65,12 @@ export const login = async (req, res) => {
     res.status(200).json({
       token,
       user: {
-        _id: user._id,
+        id: user.phone,
         name: user.name,
         email: user.email,
         phone: user.phone,
         address: user.address,
-        referalCode: user.referalCode,
+        referalCode: user.MyreferalCode,
       },
     });
   } catch (err) {
@@ -107,5 +108,75 @@ export const deleteUser = async (req, res) => {
       .json({ msg: "User deleted successfully", deletedUser: user });
   } catch (err) {
     res.status(500).json({ msg: "Server Error" });
+  }
+};
+
+export const ref15 = async (req, res) => {
+  const { reffCode, amount, my_id } = req.body;
+
+  if (!reffCode || !amount || !my_id) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+
+  const earnAmt = Number(amount) * 0.15;
+
+  try {
+    const user = await User.findOne({ MyreferalCode: reffCode });
+
+    if (!user) {
+      return res.status(404).json({ error: "Referrer not found" });
+    }
+
+    const now = new Date();
+    const date = now.toISOString().split("T")[0];
+    const time = now.toTimeString().slice(0, 5);
+    // Check if today's earning date entry exists
+
+    const dateExists = user.today_earning.find((entry) => entry.date === date);
+
+    if (dateExists) {
+      await User.updateOne(
+        { MyreferalCode: reffCode, "today_earning.date": date },
+        {
+          $push: {
+            "today_earning.$.records": {
+              time,
+              amount: earnAmt,
+              from_id: my_id,
+            },
+          },
+        }
+      );
+    } else {
+      await User.updateOne(
+        { MyreferalCode: reffCode },
+        {
+          $push: {
+            today_earning: {
+              date,
+              records: [
+                {
+                  time,
+                  amount: earnAmt,
+                  from_id: my_id,
+                },
+              ],
+            },
+          },
+        }
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: "Referral earning added",
+      add15to: reffCode,
+
+      added: earnAmt,
+      date,
+    });
+  } catch (err) {
+    console.error("Error updating earnings:", err);
+    res.status(500).json({ error: "Server error" });
   }
 };
